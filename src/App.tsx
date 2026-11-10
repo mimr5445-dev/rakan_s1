@@ -9,10 +9,30 @@ import { CharacterPortal } from './components/CharacterPortal';
 import { WardrobePortal } from './components/WardrobePortal';
 import { BackgroundPortal } from './components/BackgroundPortal';
 import { SkillsPortal } from './components/SkillsPortal';
+import { DrivePortal } from './components/DrivePortal';
+import { initAuth } from './utils/firebaseAuth';
+import { User } from 'firebase/auth';
 
 export default function App() {
   const [project, setProject] = useState<StudioProject>(() => loadProjectFromStorage());
   const [activePortal, setActivePortal] = useState<PortalType>('stage');
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+
+  // Initialize Firebase Auth listener for Google Drive tokens
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (currentUser, accessToken) => {
+        setUser(currentUser);
+        setToken(accessToken);
+      },
+      () => {
+        setUser(null);
+        setToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
 
   // Save changes to localStorage
   useEffect(() => {
@@ -41,6 +61,7 @@ export default function App() {
         project={project}
         setProject={setProject}
         onReset={handleResetProject}
+        user={user}
       />
 
       {/* Main Portal Viewport */}
@@ -106,6 +127,24 @@ export default function App() {
           <SkillsPortal
             skills={project.skills}
             onUpdateSkills={(skills) => setProject((prev) => ({ ...prev, skills }))}
+            language={project.settings.language}
+          />
+        )}
+
+        {activePortal === 'drive' && (
+          <DrivePortal
+            project={project}
+            setProject={setProject}
+            user={user}
+            token={token}
+            onLoginSuccess={(loggedUser, loggedToken) => {
+              setUser(loggedUser);
+              setToken(loggedToken);
+            }}
+            onLogout={() => {
+              setUser(null);
+              setToken(null);
+            }}
             language={project.settings.language}
           />
         )}

@@ -5,7 +5,8 @@ export type PortalType =
   | 'characters'
   | 'wardrobe'
   | 'backgrounds'
-  | 'skills';
+  | 'skills'
+  | 'drive';
 
 // Sound Effect
 export interface SoundPreset {

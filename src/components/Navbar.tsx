@@ -12,10 +12,12 @@ import {
   RotateCcw,
   Languages,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Cloud
 } from 'lucide-react';
 import { PortalType, StudioProject } from '../types/studio';
 import { exportStudioProjectZip } from '../utils/projectZip';
+import { User as FirebaseUser } from 'firebase/auth';
 
 interface NavbarProps {
   activePortal: PortalType;
@@ -23,6 +25,7 @@ interface NavbarProps {
   project: StudioProject;
   setProject: React.Dispatch<React.SetStateAction<StudioProject>>;
   onReset: () => void;
+  user?: FirebaseUser | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -30,7 +33,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActivePortal,
   project,
   setProject,
-  onReset
+  onReset,
+  user
 }) => {
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
@@ -104,7 +108,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'characters', labelAr: 'صانع الشخصيات', labelEn: 'Characters', icon: <User className="w-4 h-4" />, count: project.characters.length },
     { id: 'wardrobe', labelAr: 'خزانة الملابس والأزياء', labelEn: 'Wardrobe', icon: <Shield className="w-4 h-4" />, count: project.wardrobe.length },
     { id: 'backgrounds', labelAr: 'العوالم والخلفيات', labelEn: 'Backgrounds', icon: <Layers className="w-4 h-4" />, count: project.backgrounds.length },
-    { id: 'skills', labelAr: 'المهارات والملحقات', labelEn: 'Skills & Plugins', icon: <Sparkles className="w-4 h-4" />, count: project.skills.length }
+    { id: 'skills', labelAr: 'المهارات والملحقات', labelEn: 'Skills & Plugins', icon: <Sparkles className="w-4 h-4" />, count: project.skills.length },
+    { id: 'drive', labelAr: 'سحابة Google Drive', labelEn: 'Google Drive', icon: <Cloud className="w-4 h-4" /> }
   ];
 
   const isAr = project.settings.language === 'ar';
@@ -145,6 +150,23 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+          {/* Google Drive Cloud Quick Button */}
+          <button
+            onClick={() => setActivePortal('drive')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+              activePortal === 'drive'
+                ? 'bg-blue-600 text-white border-blue-400 shadow-md shadow-blue-500/25'
+                : user
+                ? 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/25'
+                : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:bg-slate-800'
+            }`}
+            title="سحابة Google Drive لحفظ ومزامنة الأصول والمشاريع"
+          >
+            <Cloud className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Drive</span>
+            {user && <span className="w-2 h-2 rounded-full bg-emerald-400" />}
+          </button>
+
           {/* Export Full ZIP Button */}
           <button
             onClick={handleExportZip}
@@ -153,7 +175,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="تحميل الاستوديو كامل مع التعديلات كملف مضغوط ZIP مع لعبة مستقلة كود"
           >
             {isExportingZip ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            <span>{isAr ? 'تصدير الاستوديو كاملاً (ZIP)' : 'Export Studio (ZIP)'}</span>
+            <span className="hidden sm:inline">{isAr ? 'تصدير الاستوديو (ZIP)' : 'Export (ZIP)'}</span>
+            <span className="sm:hidden">ZIP</span>
           </button>
 
           {/* Export JSON */}
