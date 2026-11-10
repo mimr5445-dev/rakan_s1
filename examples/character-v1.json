@@ -1,0 +1,195 @@
+{
+  "format": "omnistudio-character",
+  "schemaVersion": 1,
+  "character": {
+    "id": "sample-hero",
+    "name": "Mira, Sky Scout",
+    "role": "Explorer",
+    "skinTone": "#e0bb95",
+    "hairStyle": "short",
+    "hairColor": "#3b2f2f",
+    "eyeColor": "#10b981",
+    "expression": "happy",
+    "outfitId": "sky-cloak",
+    "scale": 1,
+    "animation": "walk",
+    "schema": {
+      "schemaVersion": 1,
+      "renderer": "svg-layers",
+      "metadata": {
+        "description": "A layered, reusable scout character",
+        "author": "OmniStudio example",
+        "tags": [
+          "hero",
+          "scout"
+        ],
+        "category": "adventure",
+        "assetVersion": 1
+      },
+      "assets": [
+        {
+          "id": "body-art",
+          "name": "body.svg",
+          "mimeType": "image/svg+xml",
+          "data": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTQwIj48cGF0aCBkPSJNMTggNTZRNTAgMzUgODIgNTZMNzIgMTE4SDI4WiIgZmlsbD0iIzI5NDhhMyIvPjxjaXJjbGUgY3g9IjUwIiBjeT0iMzUiIHI9IjIzIiBmaWxsPSIjZTBiYjk1Ii8+PHBhdGggZD0iTTI3IDMzUTI4IDYgNTQgMTJRNzYgMTUgNzQgMzRMNjUgMjVRNDcgMTYgMzEgMzJaIiBmaWxsPSIjM2IyZjJmIi8+PC9zdmc+",
+          "width": 100,
+          "height": 140,
+          "version": 1
+        },
+        {
+          "id": "smile-art",
+          "name": "smile.svg",
+          "mimeType": "image/svg+xml",
+          "data": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTQwIj48cGF0aCBkPSJNNDAgNDNRNTAgNTMgNjAgNDMiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzc4MzUwZiIgc3Ryb2tlLXdpZHRoPSIzIi8+PC9zdmc+",
+          "width": 100,
+          "height": 140,
+          "version": 1
+        }
+      ],
+      "layers": [
+        {
+          "id": "body",
+          "name": "Body and hair",
+          "assetId": "body-art",
+          "visible": true,
+          "order": 0,
+          "x": 0,
+          "y": 0,
+          "width": 300,
+          "height": 400,
+          "anchor": {
+            "x": 0,
+            "y": 0
+          },
+          "part": "torso"
+        },
+        {
+          "id": "face-smile",
+          "name": "Smile expression",
+          "assetId": "smile-art",
+          "visible": true,
+          "order": 1,
+          "x": 0,
+          "y": 0,
+          "width": 300,
+          "height": 400,
+          "anchor": {
+            "x": 0,
+            "y": 0
+          },
+          "part": "face"
+        }
+      ],
+      "skeleton": {
+        "bones": [
+          {
+            "id": "root",
+            "name": "Root",
+            "x": 150,
+            "y": 180,
+            "length": 80,
+            "rotation": 0
+          },
+          {
+            "id": "torso",
+            "name": "Torso",
+            "parentId": "root",
+            "x": 0,
+            "y": 0,
+            "length": 70,
+            "rotation": 0
+          },
+          {
+            "id": "arm",
+            "name": "Arm",
+            "parentId": "torso",
+            "x": 35,
+            "y": 5,
+            "length": 45,
+            "rotation": 0
+          }
+        ],
+        "ikChains": [
+          {
+            "id": "reach",
+            "rootBoneId": "torso",
+            "endBoneId": "arm",
+            "target": {
+              "x": 220,
+              "y": 140
+            }
+          }
+        ]
+      },
+      "animations": [
+        {
+          "id": "walk",
+          "name": "walk",
+          "duration": 1,
+          "loop": true,
+          "keyframes": [
+            {
+              "time": 0,
+              "boneId": "arm",
+              "rotation": -12
+            },
+            {
+              "time": 0.5,
+              "boneId": "arm",
+              "rotation": 18
+            },
+            {
+              "time": 1,
+              "boneId": "arm",
+              "rotation": -12
+            }
+          ]
+        }
+      ],
+      "expressions": {
+        "happy": {
+          "visibleLayers": [
+            "body",
+            "face-smile"
+          ]
+        },
+        "neutral": {
+          "hiddenLayers": [
+            "face-smile"
+          ]
+        }
+      },
+      "wardrobeIds": [
+        "sky-cloak"
+      ],
+      "materials": {
+        "cloth": {
+          "color": "#2948a3"
+        }
+      },
+      "audio": {
+        "voiceAssetIds": [],
+        "lipSync": {
+          "enabled": false,
+          "phonemeMap": {}
+        }
+      },
+      "variants": [
+        {
+          "id": "winter",
+          "name": "Winter scout",
+          "overrides": {
+            "materials": {
+              "cloth": {
+                "color": "#79bce3"
+              }
+            }
+          }
+        }
+      ],
+      "extensions": {
+        "producer": "OmniStudio Character Schema v1"
+      }
+    }
+  }
+}

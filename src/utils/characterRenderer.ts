@@ -1,4 +1,6 @@
 import { CharacterDesign, WardrobeItem } from '../types/studio';
+import { exportCharacterDocument } from './characterSchema';
+import { blendAnimationClips, resolveBoneWorldTransforms, sampleKeyframes, solveTwoBoneIK } from './characterAnimation';
 
 export class CharacterRenderer {
   // Generate SVG markup string representing the character (and worn outfit if provided)
@@ -9,6 +11,9 @@ export class CharacterRenderer {
     width = 300,
     height = 400
   ): string {
+    if (character.schema && character.schema.renderer !== 'procedural' && (character.schema.layers.length || character.schema.renderer === 'rigged')) {
+      return CharacterRenderer.generateAssetSvg(character, animationTime, width, height);
+    }
     // Animation offsets based on state
     let bodyY = 0;
     let legRotationLeft = 0;
@@ -50,15 +55,16 @@ export class CharacterRenderer {
       legRotationLeft = Math.sin(t * 5) * 15;
     }
 
-    const skin = character.skinTone || '#f6d8ae';
-    const hair = character.hairColor || '#3b2f2f';
-    const eyes = character.eyeColor || '#22d3ee';
+    const safeColor = (value: string | undefined, fallback: string) => value && (/^#[\da-f]{3,8}$/i.test(value) || /^(?:rgb|hsl)a?\([\d.%\s,/-]+\)$/i.test(value) || /^[a-z]{1,20}$/i.test(value)) ? value : fallback;
+    const skin = safeColor(character.skinTone, '#f6d8ae');
+    const hair = safeColor(character.hairColor, '#3b2f2f');
+    const eyes = safeColor(character.eyeColor, '#22d3ee');
 
-    const topCol = outfit?.topColor || '#4f46e5';
-    const botCol = outfit?.bottomColor || '#1e293b';
-    const accentCol = outfit?.accentColor || '#fbbf24';
-    const shoeCol = outfit?.shoesColor || '#0f172a';
-    const capeCol = outfit?.capeColor || '#dc2626';
+    const topCol = safeColor(outfit?.topColor, '#4f46e5');
+    const botCol = safeColor(outfit?.bottomColor, '#1e293b');
+    const accentCol = safeColor(outfit?.accentColor, '#fbbf24');
+    const shoeCol = safeColor(outfit?.shoesColor, '#0f172a');
+    const capeCol = safeColor(outfit?.capeColor, '#dc2626');
 
     const hasCape = outfit?.cape || false;
     const weapon = outfit?.weapon || 'none';
@@ -165,6 +171,60 @@ export class CharacterRenderer {
 </svg>`;
   }
 
+  private static generateAssetSvg(character: CharacterDesign, animationTime: number, width: number, height: number): string {
+    const schema = character.schema!;
+    const assets = new Map(schema.assets.map(asset => [asset.id, asset]));
+    const clip = schema.animations.find(item => item.name === character.animation || item.id === character.animation) ?? schema.animations[0];
+    const blendSettings = schema.extensions.animationBlend as { fromClipId?: string; toClipId?: string; weight?: number } | undefined;
+    const fromClip = blendSettings?.fromClipId ? schema.animations.find(item => item.id === blendSettings.fromClipId || item.name === blendSettings.fromClipId) : undefined;
+    const toClip = blendSettings?.toClipId ? schema.animations.find(item => item.id === blendSettings.toClipId || item.name === blendSettings.toClipId) : undefined;
+    const pose = fromClip && toClip ? blendAnimationClips(fromClip, toClip, animationTime, blendSettings?.weight ?? 0.5) : clip ? new Map(schema.skeleton.bones.map(bone => [bone.id, sampleKeyframes(clip.keyframes, animationTime % Math.max(clip.duration, 0.001), bone.id)])) : new Map();
+    const bindTransforms = resolveBoneWorldTransforms(schema.skeleton.bones);
+    for (const chain of schema.skeleton.ikChains ?? []) {
+      const rootBone = schema.skeleton.bones.find(bone => bone.id === chain.rootBoneId);
+      const endBone = schema.skeleton.bones.find(bone => bone.id === chain.endBoneId);
+      const middleBone = endBone?.parentId ? schema.skeleton.bones.find(bone => bone.id === endBone.parentId) : undefined;
+      if (rootBone && middleBone && endBone) {
+        const rootWorld = bindTransforms.get(rootBone.id)!;
+        const parentWorldRotation = rootBone.parentId ? bindTransforms.get(rootBone.parentId)?.rotation ?? 0 : 0;
+        const solution = solveTwoBoneIK({ x: rootWorld.x, y: rootWorld.y }, chain.target, rootBone.length, middleBone.length);
+        pose.set(rootBone.id, { ...(pose.get(rootBone.id) ?? {x:0,y:0,rotation:0}), rotation: solution.rootRotation - parentWorldRotation - rootBone.rotation });
+        pose.set(middleBone.id, { ...(pose.get(middleBone.id) ?? {x:0,y:0,rotation:0}), rotation: solution.jointRotation - middleBone.rotation });
+      }
+    }
+    const transforms = resolveBoneWorldTransforms(schema.skeleton.bones, pose);
+    const expression = schema.expressions[character.expression] ?? {};
+    const hiddenLayers = new Set(Array.isArray(expression.hiddenLayers) ? expression.hiddenLayers as string[] : []);
+    const visibleLayers = Array.isArray(expression.visibleLayers) ? new Set(expression.visibleLayers as string[]) : undefined;
+    const layers = [...schema.layers].filter(layer => layer.visible && !hiddenLayers.has(layer.id) && (!visibleLayers || visibleLayers.has(layer.id))).sort((a, b) => a.order - b.order).map(layer => {
+      const asset = assets.get(layer.assetId);
+      if (!asset || !/^data:image\/(?:png|jpeg|webp|gif|avif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(asset.data)) return '';
+      const baseX = Number.isFinite(layer.x) ? layer.x : 0, baseY = Number.isFinite(layer.y) ? layer.y : 0;
+      const w = typeof layer.width === 'number' && Number.isFinite(layer.width) ? layer.width : 300, h = typeof layer.height === 'number' && Number.isFinite(layer.height) ? layer.height : 400;
+      const anchor = layer.anchor ?? { x: 0, y: 0 };
+      const bone = layer.part ? transforms.get(layer.part) : undefined;
+      const bindBone = layer.part ? bindTransforms.get(layer.part) : undefined;
+      const x = baseX + (bone && bindBone ? bone.x - bindBone.x : 0), y = baseY + (bone && bindBone ? bone.y - bindBone.y : 0);
+      const rotation = (Number(layer.rotation) || 0) + (bone && bindBone ? bone.rotation - bindBone.rotation : 0);
+      const opacity = Math.max(0, Math.min(1, Number(layer.opacity ?? 1)));
+      if (layer.sprite && asset.width && asset.height && layer.sprite.columns > 0 && layer.sprite.rows > 0) {
+        const columns = Math.max(1, Math.floor(layer.sprite.columns)), rows = Math.max(1, Math.floor(layer.sprite.rows));
+        const count = Math.max(1, Math.min(columns * rows, Math.floor(layer.sprite.frameCount)));
+        const frame = layer.sprite.loop ? Math.floor(animationTime * Math.max(0, layer.sprite.frameRate)) % count : Math.min(count - 1, Math.floor(animationTime * Math.max(0, layer.sprite.frameRate)));
+        const frameWidth = asset.width / columns, frameHeight = asset.height / rows;
+        const viewX = (frame % columns) * frameWidth, viewY = Math.floor(frame / columns) * frameHeight;
+        return `<svg x="${x - w * anchor.x}" y="${y - h * anchor.y}" width="${w}" height="${h}" viewBox="${viewX} ${viewY} ${frameWidth} ${frameHeight}" opacity="${opacity}" transform="rotate(${rotation} ${x} ${y})" preserveAspectRatio="none"><image href="${asset.data}" x="0" y="0" width="${asset.width}" height="${asset.height}"/></svg>`;
+      }
+      return `<image href="${asset.data}" x="${x - w * anchor.x}" y="${y - h * anchor.y}" width="${w}" height="${h}" opacity="${opacity}" transform="rotate(${rotation} ${x} ${y})" preserveAspectRatio="xMidYMid meet"/>`;
+    }).join('');
+    const bones = schema.renderer === 'rigged' && schema.layers.length === 0 ? schema.skeleton.bones.map(bone => {
+      const world = transforms.get(bone.id)!; const rad = world.rotation * Math.PI / 180;
+      const ex = world.x + Math.cos(rad) * Math.max(0, bone.length), ey = world.y + Math.sin(rad) * Math.max(0, bone.length);
+      return `<g><line x1="${world.x}" y1="${world.y}" x2="${ex}" y2="${ey}" stroke="#f472b6" stroke-width="8" stroke-linecap="round"/><circle cx="${world.x}" cy="${world.y}" r="5" fill="#fff"/></g>`;
+    }).join('') : '';
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" width="${width}" height="${height}">${layers}${bones}</svg>`;
+  }
+
   private static renderHair(style: string, color: string): string {
     switch (style) {
       case 'short':
@@ -235,24 +295,11 @@ export class CharacterRenderer {
     }
   }
 
-  // Generate standalone SVG code
+  // Data-only export contract: characterData is a JSON literal and is parsed, never executed, by the importer.
   public static generateCode(character: CharacterDesign, outfit?: WardrobeItem): string {
-    const svg = CharacterRenderer.generateSvg(character, outfit, 0, 400, 500);
-    return `// ==========================================
-// OmniStudio Character Generator Code
-// Character: ${character.name} (${character.role})
-// ==========================================
-
-export const characterData = ${JSON.stringify(character, null, 2)};
-${outfit ? `export const outfitData = ${JSON.stringify(outfit, null, 2)};` : ''}
-
-export const characterSvg = \`${svg}\`;
-
-// Render into container:
-export function renderCharacter(containerId) {
-  const el = document.getElementById(containerId);
-  if (el) el.innerHTML = characterSvg;
-}
-`;
+    const canonical = exportCharacterDocument(character);
+    const exportedOutfit = outfit ?? (character.schema?.extensions.officialExportOutfit as WardrobeItem | undefined);
+    const svg = CharacterRenderer.generateSvg(canonical.character, exportedOutfit, 0, 400, 500);
+    return `// OmniStudio Character Export v${canonical.schemaVersion} — import parses JSON only\nexport const characterData = ${JSON.stringify(canonical.character, null, 2)};\n${exportedOutfit ? `export const outfitData = ${JSON.stringify(exportedOutfit, null, 2)};\n` : ''}export const characterSvg = ${JSON.stringify(svg)};\n\n// Optional browser preview helper. Importers never execute this function.\nexport function renderCharacter(containerId) {\n  const el = document.getElementById(containerId);\n  if (el) el.innerHTML = characterSvg;\n}\n`;
   }
 }

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { StudioProject, PhysicsBody } from '../types/studio';
 import { BackgroundRenderer } from '../utils/backgroundRenderer';
+import { CharacterRenderer } from '../utils/characterRenderer';
 import { audioSynth } from '../utils/audioSynth';
 import { CodeModal } from './CodeModal';
 
@@ -174,6 +175,7 @@ export const StageDirectorPortal: React.FC<StageDirectorPortalProps> = ({
     let lastTime = performance.now();
     let bgOffset = 0;
     let stageTime = 0;
+    const characterSpriteCache = new Map<string, HTMLImageElement>();
 
     const loop = (now: number) => {
       const rawDt = (now - lastTime) / 1000;
@@ -331,6 +333,19 @@ export const StageDirectorPortal: React.FC<StageDirectorPortalProps> = ({
       ctx.translate(p.x, p.y);
       ctx.scale(p.direction, 1);
 
+      const isExternalRig = !!activeChar.schema && activeChar.schema.renderer !== 'procedural' && (activeChar.schema.layers.length > 0 || activeChar.schema.renderer === 'rigged');
+      if (isExternalRig) {
+        const frameTime = Math.floor(p.animTime * 10) / 10;
+        const cacheKey = `${activeChar.id}:${activeOutfit?.id ?? ''}:${activeChar.animation}:${frameTime}`;
+        let sprite = characterSpriteCache.get(cacheKey);
+        if (!sprite) {
+          sprite = new Image();
+          sprite.onload = () => { if (characterSpriteCache.size > 30) characterSpriteCache.delete(characterSpriteCache.keys().next().value!); };
+          sprite.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(CharacterRenderer.generateSvg(activeChar, activeOutfit, frameTime, 300, 400))}`;
+          characterSpriteCache.set(cacheKey, sprite);
+        }
+        if (sprite.complete && sprite.naturalWidth > 0) ctx.drawImage(sprite, -27, -86, 54, 86);
+      } else {
       // Character animation offsets
       let legOffset = 0;
       let bodyBob = 0;
@@ -431,6 +446,7 @@ export const StageDirectorPortal: React.FC<StageDirectorPortalProps> = ({
         ctx.beginPath();
         ctx.ellipse(14, -40 - bodyBob, 8, 14, 0, 0, Math.PI * 2);
         ctx.fill();
+      }
       }
 
       ctx.restore();

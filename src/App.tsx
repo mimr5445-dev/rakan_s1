@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PortalType, StudioProject } from './types/studio';
-import { DEFAULT_STUDIO_PROJECT, loadProjectFromStorage, saveProjectToStorage } from './utils/storage';
+import { DEFAULT_STUDIO_PROJECT, loadProjectFromStorage, hydrateProjectFromStorage, saveProjectToStorage } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { StageDirectorPortal } from './components/StageDirectorPortal';
 import { AudioPortal } from './components/AudioPortal';
@@ -15,6 +15,8 @@ import { User } from 'firebase/auth';
 
 export default function App() {
   const [project, setProject] = useState<StudioProject>(() => loadProjectFromStorage());
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageError, setStorageError] = useState('');
   const [activePortal, setActivePortal] = useState<PortalType>('stage');
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -34,10 +36,21 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Save changes to localStorage
+  // Restore asset-heavy projects from IndexedDB before persisting any edits.
   useEffect(() => {
-    saveProjectToStorage(project);
-  }, [project]);
+    let live = true;
+    void hydrateProjectFromStorage().then((stored) => {
+      if (live) { setProject(stored); setStorageReady(true); }
+    });
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    let live = true;
+    void saveProjectToStorage(project).then(() => { if (live) setStorageError(''); }).catch((error) => { if (live) setStorageError(error instanceof Error ? error.message : 'Project save failed'); });
+    return () => { live = false; };
+  }, [project, storageReady]);
 
   // Sync RTL / LTR document direction with language setting
   useEffect(() => {
@@ -98,6 +111,7 @@ export default function App() {
             activeCharacterId={project.activeCharacterId}
             onSelectCharacter={(id) => setProject((prev) => ({ ...prev, activeCharacterId: id }))}
             onUpdateCharacters={(characters) => setProject((prev) => ({ ...prev, characters }))}
+            onUpdateWardrobe={(wardrobe) => setProject((prev) => ({ ...prev, wardrobe }))}
             language={project.settings.language}
           />
         )}
@@ -152,6 +166,7 @@ export default function App() {
 
       {/* Footer Branding */}
       <footer className="border-t border-slate-900 bg-slate-950/80 py-4 text-center text-xs text-slate-500">
+        {storageError && <p role="alert" className="text-rose-300 mb-2">{project.settings.language === 'ar' ? 'تعذر حفظ المشروع: ' : 'Project save failed: '}{storageError}</p>}
         <p>OmniStudio Engine • استوديو الألعاب والمحاكاة التفاعلية المتكامل • Extensible Modular Creative Engine</p>
       </footer>
     </div>
