@@ -1,4 +1,5 @@
 import { StudioProject } from '../types/studio';
+import { migrateCharacter } from './characterSchema';
 
 export const DEFAULT_STUDIO_PROJECT: StudioProject = {
   version: '2.0.0',
@@ -443,33 +444,65 @@ function onShockwave(player, bodies) {
 
 const STORAGE_KEY = 'omni_studio_project_v2';
 
+function mergeStoredProject(parsed: any): StudioProject {
+  let characters = Array.isArray(parsed.characters) && parsed.characters.length ? parsed.characters : DEFAULT_STUDIO_PROJECT.characters;
+  characters = characters.map((character: unknown) => { try { return migrateCharacter(character); } catch { return character; } });
+  return {
+    ...DEFAULT_STUDIO_PROJECT, ...parsed,
+    sounds: parsed.sounds?.length ? parsed.sounds : DEFAULT_STUDIO_PROJECT.sounds,
+    physicsPresets: parsed.physicsPresets?.length ? parsed.physicsPresets : DEFAULT_STUDIO_PROJECT.physicsPresets,
+    characters,
+    wardrobe: parsed.wardrobe?.length ? parsed.wardrobe : DEFAULT_STUDIO_PROJECT.wardrobe,
+    backgrounds: parsed.backgrounds?.length ? parsed.backgrounds : DEFAULT_STUDIO_PROJECT.backgrounds,
+    skills: parsed.skills?.length ? parsed.skills : DEFAULT_STUDIO_PROJECT.skills,
+  };
+}
+
+const DB_NAME = 'omnistudio-assets';
+const DB_STORE = 'project';
+function openProjectDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('IndexedDB unavailable'));
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(DB_STORE)) request.result.createObjectStore(DB_STORE); };
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+  });
+}
+
 export function loadProjectFromStorage(): StudioProject {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      // Ensure merge with default properties in case new arrays were added
-      return {
-        ...DEFAULT_STUDIO_PROJECT,
-        ...parsed,
-        sounds: parsed.sounds?.length ? parsed.sounds : DEFAULT_STUDIO_PROJECT.sounds,
-        physicsPresets: parsed.physicsPresets?.length ? parsed.physicsPresets : DEFAULT_STUDIO_PROJECT.physicsPresets,
-        characters: parsed.characters?.length ? parsed.characters : DEFAULT_STUDIO_PROJECT.characters,
-        wardrobe: parsed.wardrobe?.length ? parsed.wardrobe : DEFAULT_STUDIO_PROJECT.wardrobe,
-        backgrounds: parsed.backgrounds?.length ? parsed.backgrounds : DEFAULT_STUDIO_PROJECT.backgrounds,
-        skills: parsed.skills?.length ? parsed.skills : DEFAULT_STUDIO_PROJECT.skills
-      };
-    }
-  } catch (e) {
-    console.warn('Failed to load project from localStorage, using defaults', e);
-  }
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return mergeStoredProject(JSON.parse(raw)); }
+  catch (e) { console.warn('Failed to load local project snapshot', e); }
   return DEFAULT_STUDIO_PROJECT;
 }
 
-export function saveProjectToStorage(project: StudioProject): void {
+/** IndexedDB is the durable store for asset-heavy projects; localStorage remains a migration/fallback snapshot. */
+export async function hydrateProjectFromStorage(): Promise<StudioProject> {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-  } catch (e) {
-    console.warn('Failed to save project to localStorage', e);
-  }
+    const db = await openProjectDb();
+    const value = await new Promise<any>((resolve, reject) => { const request = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get('current'); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+    db.close();
+    if (value) return mergeStoredProject(value);
+  } catch (error) { console.warn('IndexedDB project restore failed; using local snapshot', error); }
+  return loadProjectFromStorage();
+}
+
+let projectSaveQueue: Promise<void> = Promise.resolve();
+export function saveProjectToStorage(project: StudioProject): Promise<void> {
+  const queued = projectSaveQueue.then(() => persistProject(project));
+  projectSaveQueue = queued.catch(() => undefined);
+  return queued;
+}
+async function persistProject(project: StudioProject): Promise<void> {
+  const serialized = JSON.stringify(project);
+  let indexedDbSaved = false;
+  try {
+    const db = await openProjectDb();
+    await new Promise<void>((resolve, reject) => { const transaction = db.transaction(DB_STORE, 'readwrite'); transaction.objectStore(DB_STORE).put(project, 'current'); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error); });
+    db.close(); indexedDbSaved = true;
+  } catch (error) { console.warn('IndexedDB save failed; attempting browser snapshot', error); }
+  try {
+    if (serialized.length < 3_500_000) { localStorage.setItem(STORAGE_KEY, serialized); return; }
+    if (indexedDbSaved) { localStorage.removeItem(STORAGE_KEY); return; }
+  } catch (error) { if (!indexedDbSaved) throw new Error(`Project could not be saved: IndexedDB and local snapshot failed (${String(error)})`); }
+  if (!indexedDbSaved) throw new Error('Project could not be saved: browser storage is unavailable or the project exceeds localStorage quota.');
 }

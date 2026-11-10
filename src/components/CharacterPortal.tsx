@@ -9,11 +9,17 @@ import {
   Sparkles,
   Play,
   Smile,
-  Scissors
+  Scissors,
+  Search,
+  History,
+  Save
 } from 'lucide-react';
 import { CharacterDesign, WardrobeItem } from '../types/studio';
 import { CharacterRenderer } from '../utils/characterRenderer';
 import { CodeModal } from './CodeModal';
+import { parseCharacterText } from '../utils/characterImport';
+import { createCharacterSchema } from '../utils/characterSchema';
+import { getCharacterRevisions, saveCharacterRevision, restoreCharacterRevision } from '../utils/characterLibrary';
 
 interface CharacterPortalProps {
   characters: CharacterDesign[];
@@ -21,6 +27,7 @@ interface CharacterPortalProps {
   activeCharacterId: string;
   onSelectCharacter: (id: string) => void;
   onUpdateCharacters: (characters: CharacterDesign[]) => void;
+  onUpdateWardrobe?: (wardrobe: WardrobeItem[]) => void;
   language: 'ar' | 'en';
 }
 
@@ -30,6 +37,7 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
   activeCharacterId,
   onSelectCharacter,
   onUpdateCharacters,
+  onUpdateWardrobe,
   language
 }) => {
   const isAr = language === 'ar';
@@ -39,6 +47,7 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
   const [animTime, setAnimTime] = useState(0);
   const [codeModalOpen, setCodeModalOpen] = useState(false);
   const [isImportMode, setIsImportMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Live animation loop
   useEffect(() => {
@@ -69,7 +78,8 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
       outfitId: wardrobe[0]?.id || '',
       scale: 1,
       animation: 'idle',
-      role: isAr ? 'مغامر' : 'Adventurer'
+      role: isAr ? 'مغامر' : 'Adventurer',
+      schema: createCharacterSchema()
     };
     onUpdateCharacters([newChar, ...characters]);
     onSelectCharacter(newChar.id);
@@ -87,10 +97,23 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
   };
 
   const handleDelete = () => {
-    if (characters.length <= 1) return;
+    if (characters.length <= 1 || !window.confirm(isAr ? `حذف ${activeChar.name} من المكتبة؟ ستبقى نسخ المشاريع المخزنة مستقلة.` : `Remove ${activeChar.name} from the library? Existing saved project copies remain unchanged.`)) return;
     const filtered = characters.filter((c) => c.id !== activeChar.id);
     onUpdateCharacters(filtered);
     onSelectCharacter(filtered[0]?.id || '');
+  };
+
+  const handleSaveVersion = () => {
+    if (!activeChar) return;
+    const versioned = saveCharacterRevision(activeChar, new Date().toLocaleString());
+    onUpdateCharacters(characters.map(character => character.id === activeChar.id ? versioned : character));
+  };
+  const handleRestoreVersion = (revisionId: string) => {
+    if (!activeChar || !window.confirm(isAr ? 'استعادة هذه النسخة؟ ستظل النسخة الحالية محفوظة.' : 'Restore this version? The current version remains saved.')) return;
+    try {
+      const restored = restoreCharacterRevision(activeChar, revisionId);
+      onUpdateCharacters(characters.map(character => character.id === activeChar.id ? restored : character));
+    } catch (error) { window.alert(error instanceof Error ? error.message : 'Restore failed'); }
   };
 
   const handleDownloadSvg = () => {
@@ -105,28 +128,23 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleImportCode = (rawText: string) => {
+  const handleImportCode = (rawText: string): string | void => {
     try {
-      if (rawText.trim().startsWith('{')) {
-        const parsed = JSON.parse(rawText) as CharacterDesign;
-        const newChar: CharacterDesign = {
-          id: 'char_' + Date.now(),
-          name: parsed.name || (isAr ? 'شخصية مستوردة' : 'Imported Character'),
-          skinTone: parsed.skinTone || '#f6d8ae',
-          hairStyle: parsed.hairStyle || 'short',
-          hairColor: parsed.hairColor || '#334155',
-          eyeColor: parsed.eyeColor || '#06b6d4',
-          expression: parsed.expression || 'neutral',
-          outfitId: wardrobe[0]?.id || '',
-          scale: 1,
-          animation: 'idle',
-          role: parsed.role || 'Warrior'
-        };
-        onUpdateCharacters([newChar, ...characters]);
-        onSelectCharacter(newChar.id);
+      const result = parseCharacterText(rawText);
+      const imported = result.character;
+      if (characters.some((existing) => existing.id === imported.id)) {
+        return isAr ? `المعرّف ${imported.id} موجود بالفعل. غيّر المعرّف في الملف قبل الاستيراد حتى لا تُستبدل شخصية.` : `Character id ${imported.id} already exists. Change the id before importing; no data was changed.`;
       }
-    } catch (e) {
-      console.warn('Import error:', e);
+      const exportedOutfit = imported.schema?.extensions.officialExportOutfit as WardrobeItem | undefined;
+      if (exportedOutfit && typeof exportedOutfit.id === 'string' && /^[\\w.-]{1,128}$/.test(exportedOutfit.id) && typeof exportedOutfit.name === 'string') {
+        const existingOutfit = wardrobe.find(item => item.id === exportedOutfit.id);
+        if (existingOutfit && JSON.stringify(existingOutfit) !== JSON.stringify(exportedOutfit)) return isAr ? `معرّف الزي ${exportedOutfit.id} موجود ببيانات مختلفة. لم يتم تعديل المكتبة.` : `Outfit id ${exportedOutfit.id} conflicts with different data. Nothing was changed.`;
+        if (!existingOutfit && onUpdateWardrobe) onUpdateWardrobe([exportedOutfit, ...wardrobe]);
+      }
+      onUpdateCharacters([imported, ...characters]);
+      onSelectCharacter(imported.id);
+    } catch (error) {
+      return error instanceof Error ? error.message : (isAr ? 'تعذر استيراد الشخصية' : 'Character import failed');
     }
   };
 
@@ -136,7 +154,7 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
 
   const hairStyles: CharacterDesign['hairStyle'][] = ['short', 'spiky', 'long', 'curly', 'cyberpunk', 'none'];
   const expressions: CharacterDesign['expression'][] = ['neutral', 'happy', 'fierce', 'surprised', 'focused'];
-  const animations: CharacterDesign['animation'][] = ['idle', 'walk', 'jump', 'attack', 'dance'];
+  const animations = [...new Set(['idle', 'walk', 'jump', 'attack', 'dance', ...(activeChar?.schema?.animations ?? []).map(clip => clip.name)])];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -183,11 +201,12 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
         {/* Left Column: Character List (3 cols) */}
         <div className="lg:col-span-3 bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-2">
           <div className="text-xs font-bold text-slate-300 px-1 mb-2">
-            {isAr ? 'شخصيات الاستوديو' : 'Character Roster'}
+            {isAr ? 'مكتبة الشخصيات' : 'Character Library'} ({characters.length})
           </div>
+          <label className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 mb-2"><Search className="w-3.5 h-3.5 text-slate-500" /><input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-transparent text-xs outline-none text-white" placeholder={isAr ? 'بحث بالاسم أو الدور' : 'Search name or role'} /></label>
 
           <div className="flex flex-col gap-1.5">
-            {characters.map((char) => {
+            {characters.filter(char => `${char.name} ${char.role} ${char.id}`.toLowerCase().includes(searchQuery.toLowerCase())).map((char) => {
               const isSelected = char.id === activeChar.id;
               return (
                 <div
@@ -240,6 +259,7 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
+              <button onClick={handleSaveVersion} className="p-1.5 rounded-lg bg-slate-800 hover:bg-indigo-900/40 text-slate-300" title={isAr ? 'حفظ إصدار' : 'Save version'}><Save className="w-3.5 h-3.5" /></button>
             </div>
           </div>
 
@@ -432,6 +452,29 @@ export const CharacterPortal: React.FC<CharacterPortalProps> = ({
               ))}
             </select>
           </div>
+          {getCharacterRevisions(activeChar).length > 0 && <div className="space-y-1"><label className="text-xs font-semibold text-slate-400 flex items-center gap-1"><History className="w-3.5 h-3.5" />{isAr ? 'الإصدارات المحفوظة' : 'Saved versions'}</label><select defaultValue="" onChange={e => { if (e.target.value) handleRestoreVersion(e.target.value); e.currentTarget.value = ''; }} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200"><option value="">{isAr ? 'اختر إصداراً للاستعادة' : 'Choose version to restore'}</option>{getCharacterRevisions(activeChar).map(revision => <option key={revision.id} value={revision.id}>{revision.label} · {new Date(revision.createdAt).toLocaleString()}</option>)}</select></div>}
+          {activeChar.schema?.layers?.length ? (
+            <section className="space-y-2 border-t border-slate-800 pt-3">
+              <div className="text-xs font-bold text-slate-300">{isAr ? 'محرر الطبقات' : 'Layer editor'} · {activeChar.schema.layers.length}</div>
+              {[...activeChar.schema.layers].sort((a, b) => a.order - b.order).map((layer) => (
+                <label key={layer.id} className="flex items-center justify-between gap-2 text-xs text-slate-300 bg-slate-950/60 rounded-lg p-2">
+                  <span className="truncate">{layer.name} <span className="text-slate-500">({layer.part || layer.assetId})</span></span>
+                  <input type="checkbox" checked={layer.visible} onChange={(event) => handleUpdateActive({ schema: { ...activeChar.schema!, layers: activeChar.schema!.layers.map((item) => item.id === layer.id ? { ...item, visible: event.target.checked } : item) } })} />
+                </label>
+              ))}
+            </section>
+          ) : null}
+          {activeChar.schema?.skeleton?.bones?.length ? (
+            <section className="space-y-2 border-t border-slate-800 pt-3">
+              <div className="text-xs font-bold text-slate-300">{isAr ? 'الهيكل والمفاصل' : 'Skeleton & joints'}</div>
+              {activeChar.schema.skeleton.bones.map((bone) => (
+                <div key={bone.id} className="grid grid-cols-[1fr_72px] items-center gap-2 text-xs text-slate-300">
+                  <span>{bone.name} <span className="text-slate-500">{bone.parentId ? `← ${bone.parentId}` : 'root'}</span></span>
+                  <input aria-label={`${bone.name} rotation`} type="number" value={bone.rotation} onChange={(event) => handleUpdateActive({ schema: { ...activeChar.schema!, skeleton: { ...activeChar.schema!.skeleton, bones: activeChar.schema!.skeleton.bones.map((item) => item.id === bone.id ? { ...item, rotation: Number(event.target.value) || 0 } : item) } } })} className="bg-slate-950 border border-slate-700 rounded px-2 py-1" />
+                </div>
+              ))}
+            </section>
+          ) : null}
         </div>
       </div>
 

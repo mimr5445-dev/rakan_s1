@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import { StudioProject } from '../types/studio';
 import { AudioSynthesizer } from './audioSynth';
 import { CharacterRenderer } from './characterRenderer';
+import { migrateCharacter } from './characterSchema';
 import { PhysicsEngine } from './physicsEngine';
 import { BackgroundRenderer } from './backgroundRenderer';
 
@@ -63,6 +64,21 @@ ${project.description}
       const code = CharacterRenderer.generateCode(char, matchingOutfit);
       charFolder.file(`${char.id}.svg`, svg);
       charFolder.file(`${char.id}.js`, code);
+      const canonical = migrateCharacter(char);
+      const packagedAssets = canonical.schema!.assets.map((asset) => {
+        const match = asset.data.match(/^data:([^;]+);base64,([A-Za-z0-9+/=]+)$/);
+        if (!match) return asset;
+        const extensionByMime: Record<string, string> = { 'image/svg+xml':'svg', 'image/png':'png', 'image/jpeg':'jpg', 'image/webp':'webp', 'image/gif':'gif', 'image/avif':'avif', 'audio/mpeg':'mp3', 'audio/wav':'wav', 'audio/ogg':'ogg' };
+        const extension = extensionByMime[asset.mimeType];
+        if (!extension) return asset;
+        const path = `assets/${asset.id}.${extension}`;
+        const binary = atob(match[2]);
+        const bytes = Uint8Array.from(binary, (value) => value.charCodeAt(0));
+        charFolder.file(`${char.id}/${path}`, bytes);
+        return { ...asset, data: undefined, path };
+      });
+      const characterManifest = { ...canonical, schema: { ...canonical.schema!, assets: packagedAssets } };
+      charFolder.file(`${char.id}/character.json`, JSON.stringify({ format: 'omnistudio-character', schemaVersion: 1, character: characterManifest }, null, 2));
     });
   }
 

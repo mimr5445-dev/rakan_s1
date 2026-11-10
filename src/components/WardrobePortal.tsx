@@ -115,28 +115,30 @@ export const WardrobePortal: React.FC<WardrobePortalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleImportCode = (rawText: string) => {
+  const handleImportCode = (rawText: string): string | void => {
     try {
-      if (rawText.trim().startsWith('{')) {
-        const parsed = JSON.parse(rawText) as WardrobeItem;
-        const newOutfit: WardrobeItem = {
-          id: 'outfit_' + Date.now(),
-          name: parsed.name || (isAr ? 'زي مستورد' : 'Imported Outfit'),
-          category: parsed.category || 'armor',
-          topColor: parsed.topColor || '#3b82f6',
-          bottomColor: parsed.bottomColor || '#1e293b',
-          accentColor: parsed.accentColor || '#f59e0b',
-          headwear: parsed.headwear || 'none',
-          cape: !!parsed.cape,
-          capeColor: parsed.capeColor || '#dc2626',
-          weapon: parsed.weapon || 'sword',
-          shoesColor: parsed.shoesColor || '#0f172a'
-        };
-        onUpdateWardrobe([newOutfit, ...wardrobe]);
-        onSelectOutfit(newOutfit.id);
-      }
-    } catch (e) {
-      console.warn('Import error:', e);
+      const parsed = JSON.parse(rawText) as Partial<WardrobeItem>;
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.name !== 'string') return isAr ? 'ملف الزي غير صالح أو لا يحتوي على اسم.' : 'Invalid outfit JSON or missing name.';
+      const id = typeof parsed.id === 'string' && /^[\w.-]{1,128}$/.test(parsed.id) ? parsed.id : `outfit_${Date.now()}`;
+      if (wardrobe.some(item => item.id === id)) return isAr ? `معرّف الزي ${id} موجود بالفعل.` : `Outfit id ${id} already exists.`;
+      const newOutfit: WardrobeItem = {
+        ...parsed,
+        id,
+        name: parsed.name || (isAr ? 'زي مستورد' : 'Imported Outfit'),
+        category: parsed.category || 'armor',
+        topColor: parsed.topColor || '#3b82f6',
+        bottomColor: parsed.bottomColor || '#1e293b',
+        accentColor: parsed.accentColor || '#f59e0b',
+        headwear: parsed.headwear || 'none',
+        cape: !!parsed.cape,
+        capeColor: parsed.capeColor || '#dc2626',
+        weapon: parsed.weapon || 'sword',
+        shoesColor: parsed.shoesColor || '#0f172a'
+      } as WardrobeItem;
+      onUpdateWardrobe([newOutfit, ...wardrobe]);
+      onSelectOutfit(newOutfit.id);
+    } catch (error) {
+      return error instanceof Error ? error.message : (isAr ? 'تعذر استيراد الزي' : 'Outfit import failed');
     }
   };
 
@@ -415,6 +417,7 @@ export const WardrobePortal: React.FC<WardrobePortalProps> = ({
         language="json"
         filename={`${activeOutfit.id}_outfit.json`}
         isImportMode={isImportMode}
+        importKind="generic"
         onClose={() => setCodeModalOpen(false)}
         onImport={handleImportCode}
       />
